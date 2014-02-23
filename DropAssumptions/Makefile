@@ -8,7 +8,7 @@
 ##===----------------------------------------------------------------------===##
 
 LEVEL = ../../..
-LIBRARYNAME = LLVMDropAssumptionsPass
+LIBRARYNAME = LLVMDropAssumptions
 LOADABLE_MODULE = 1
 USEDLIBS =
 

@@ -1,8 +1,9 @@
 This code illustrates a hack that can be used to express an assumption about a particular code path to the LLVM optimizer.  This was extracted from a slightly larger project (to extend the C++ language with function pre and post conditions and object invariants) since the topic keeps coming up on the LLVM mailing list.  
 
-To build this, drop the DropAssumptions folder under llvm/libs/Transforms, then do the standard ./configure && make.  To use, see the example build process used to build assume.cpp (in assume.sh.)
+To build this, drop the DropAssumptions folder under llvm/libs/Transforms, add the new subdirectory to the Transforms level Makefile, and then do the standard ./configure && make.  
+
+To use, see the example build process used to build assume.cpp (in assume.sh.)  You don't need to use custom built binaries for clang or opt once you have the DropAssumptions shared object build.
 
 The key issue this hack is working around is that llvm_unreachable blocks are eliminated too early by the optimizer and do not effect downstream branches.  The right way of fixing this is to tackle that problem, but this is "good enough" for the moment.
-
 
 WARNING: This code has not been well tested and should be considered a proof of concept rather than anything else.  USE AT YOUR OWN RISK.

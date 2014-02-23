@@ -1,4 +1,4 @@
-//===- Hello.cpp - Example code from "Writing an LLVM Pass" ---------------===//
+//===----------------------------------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,18 +7,18 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements two versions of the LLVM "Hello World" pass described
-// in docs/WritingAnLLVMPass.html
+// This file implements a custom pass which unconditionally removes calls to "llvm.assume_trap" and replaces them with "unreachable".
 //
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "DropAssumptionsPass"
 #include "llvm/Pass.h"
-#include "llvm/Function.h"
-#include "llvm/BasicBlock.h"
-#include "llvm/Instruction.h"
-#include "llvm/Instructions.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/InstIterator.h"
 #include "llvm/ADT/Statistic.h"
 using namespace llvm;
 
@@ -36,41 +36,58 @@ namespace {
     DropAssumptionsPass() : FunctionPass(ID) {}
 
     virtual bool runOnFunction(Function &F) {
-      bool functionChanged = false;
-
       // Search through each instruction in each basic block to find call 
-      // instructions with the appropriate callee.
-
-      for(Function::iterator bbitr = F.begin();
-          bbitr != F.end(); bbitr++) {
-
-        BasicBlock::iterator iitr = bbitr->begin();
-        while( iitr != bbitr->end()) {
-          // note: once we erase the call instruction, it's not clear
-          // what happens to the basic block instruction iterator pointing
-          // to it.  To be safe, avoid the need to increment that (probably 
-          // invalid) iterator.
-          BasicBlock::iterator next = iitr;
-          next++;
-          if( Instruction::Call == iitr->getOpcode() ) {
-            CallInst* call = dyn_cast<CallInst>(iitr);
-            assert( call );
-            std::string sCallee = call->getCalledFunction()->getNameStr();
-            if( g_AssumeFunctionName  == sCallee ||
-                g_AssumeFunctionName2 == sCallee) {
-              assert( call->use_empty() && 
-                      "Cannot erase instruction that is used!" );
-              ++DropCounter;
-              // Remove this instruction from the basic block.  
-              // Warning: calls delete(this); do not double delete.
-              call->eraseFromParent(); 
-              functionChanged = true;
-            }
+      // instructions with the appropriate callee.  We don't delete them
+      // in this pass to avoid trouble with iterator invalidation.
+      std::vector<CallInst*> toRemove;
+      for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+        if( CallInst* CI = dyn_cast<CallInst>(&*I) ) {
+          Function* F = CI->getCalledFunction();
+          if( !F ) continue; // indirect call
+          if( F->getName().equals(g_AssumeFunctionName) ||
+              F->getName().equals(g_AssumeFunctionName2) ) {
+            toRemove.push_back(CI);
           }
-          iitr = next;
-        } // end while
+        }
       }
-      return functionChanged;
+
+      for(unsigned i = 0; i < toRemove.size(); i++) {
+        CallInst* call = toRemove[i];
+        assert( call );
+        assert( call->use_empty() && 
+                "Cannot erase instruction that is used!" );
+        ++DropCounter;
+
+        BasicBlock* BB = call->getParent();
+
+        // Split the basic block and move the call into the new basic
+        // block - this will all become dead code.
+        call->getParent()->splitBasicBlock( BasicBlock::iterator(call), 
+                                            "dead code");
+
+        // get the newly inserted unconditional branch
+        Instruction* br = BB->getTerminator();
+        //insert the unreached before the branch and remove the branch
+        //so the unreachable becomes the terminating instruction.  This
+        //actual makes the new block dead.
+        new UnreachableInst( F.getContext(), br);
+        br->eraseFromParent();
+        br = NULL;
+
+        // Remove this instruction from the basic block.  
+        // Warning: calls delete(this); do not double delete.
+        call->eraseFromParent(); 
+        // This wasn't actually needed since the entire BB is 
+        // dead now, but is a useful cleanup.
+
+        // best practice
+        call = NULL;
+        toRemove[i] = NULL;
+      }
+
+      F.dump();
+      
+      return !toRemove.empty();
     }
 
 #if 0
